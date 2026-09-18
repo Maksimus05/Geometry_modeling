@@ -1,4 +1,4 @@
-"""САПР ЛР №1: отрезок в декартовых и полярных координатах."""
+"""САПР: геометрическое моделирование с интерактивной навигацией."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from shapes import SegmentShape, Shape
 class SaprApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("САПР · ЛР №1 — Отрезок как базовый элемент")
+        self.title("САПР · ЛР №2 — Интерактивная навигация рабочей области")
         self.geometry("1280x760")
         self.minsize(980, 620)
         self.configure(bg="#e8e4d8")
@@ -28,6 +28,7 @@ class SaprApp(tk.Tk):
         self.bg_color = "#f7f4ea"
         self.grid_color = "#cfc8b8"
         self.segment_color = "#1f4e79"
+        self.status_text = tk.StringVar()
 
         self._objects: list[Shape] = []
         self._p1: Optional[Point] = None
@@ -59,10 +60,20 @@ class SaprApp(tk.Tk):
         style.configure("Tool.TButton", font=("Segoe UI", 10, "bold"), padding=(12, 6))
 
     def _build_ui(self) -> None:
+        self._build_menu()
+
         toolbar = ttk.Frame(self, style="Toolbar.TFrame", padding=(10, 8))
         toolbar.pack(fill=tk.X, side=tk.TOP)
         ttk.Button(toolbar, text="Отрезок", style="Tool.TButton", command=self.start_segment).pack(side=tk.LEFT, padx=4)
         ttk.Button(toolbar, text="Удалить", style="Tool.TButton", command=self.delete_last).pack(side=tk.LEFT, padx=4)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        ttk.Button(toolbar, text="Рука", command=self.activate_pan_tool).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="Лупа+", command=self.zoom_in).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="Лупа-", command=self.zoom_out).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="Показать все", command=self.fit_all).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="Поворот влево", command=self.rotate_left).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="Поворот вправо", command=self.rotate_right).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="Сбросить вид", command=self.reset_view).pack(side=tk.LEFT, padx=3)
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
         ttk.Button(toolbar, text="Цвет отрезка", command=lambda: self._pick_color("segment")).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="Цвет фона", command=lambda: self._pick_color("bg")).pack(side=tk.LEFT, padx=3)
@@ -79,8 +90,16 @@ class SaprApp(tk.Tk):
 
         canvas_wrap = ttk.Frame(body, style="Root.TFrame")
         canvas_wrap.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8)
-        self.canvas = WorkCanvas(canvas_wrap, on_point=self._on_canvas_point, bg=self.bg_color)
+        self.canvas = WorkCanvas(
+            canvas_wrap,
+            on_point=self._on_canvas_point,
+            on_view_change=self._update_status,
+            on_cursor_change=lambda _point: self._update_status(),
+            bg=self.bg_color,
+        )
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        self._build_context_menu()
+        self._bind_navigation_keys()
 
         info = ttk.Frame(body, style="Panel.TFrame", padding=12, width=300)
         info.pack(side=tk.RIGHT, fill=tk.Y)
@@ -89,7 +108,7 @@ class SaprApp(tk.Tk):
 
         status = tk.Label(
             self,
-            text="ЛКМ — новый отрезок (две точки) · Удалить — последний объект · ПКМ — панорама · колесо — масштаб",
+            textvariable=self.status_text,
             bg="#d9d2c3",
             fg="#3d3a32",
             font=("Segoe UI", 9),
@@ -98,6 +117,104 @@ class SaprApp(tk.Tk):
             pady=4,
         )
         status.pack(fill=tk.X, side=tk.BOTTOM)
+        self._update_status()
+
+    def _build_menu(self) -> None:
+        menubar = tk.Menu(self)
+        view_menu = tk.Menu(menubar, tearoff=False)
+        view_menu.add_command(label="Рука", accelerator="H", command=self.activate_pan_tool)
+        view_menu.add_separator()
+        view_menu.add_command(label="Увеличить", accelerator="Ctrl++", command=self.zoom_in)
+        view_menu.add_command(label="Уменьшить", accelerator="Ctrl+-", command=self.zoom_out)
+        view_menu.add_command(label="Показать весь чертеж", accelerator="Home", command=self.fit_all)
+        view_menu.add_separator()
+        view_menu.add_command(label="Поворот налево", accelerator="Q", command=self.rotate_left)
+        view_menu.add_command(label="Поворот направо", accelerator="E", command=self.rotate_right)
+        view_menu.add_command(label="Сбросить вид", accelerator="Ctrl+0", command=self.reset_view)
+        menubar.add_cascade(label="Вид", menu=view_menu)
+        self.configure(menu=menubar)
+
+    def _build_context_menu(self) -> None:
+        self.context_menu = tk.Menu(self, tearoff=False)
+        self.context_menu.add_command(label="Рука", command=self.activate_pan_tool)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Увеличить", command=self.zoom_in)
+        self.context_menu.add_command(label="Уменьшить", command=self.zoom_out)
+        self.context_menu.add_command(label="Показать весь чертеж", command=self.fit_all)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Поворот налево", command=self.rotate_left)
+        self.context_menu.add_command(label="Поворот направо", command=self.rotate_right)
+        self.context_menu.add_command(label="Сбросить вид", command=self.reset_view)
+        self.canvas.bind("<Button-3>", self._show_context_menu)
+
+    def _bind_navigation_keys(self) -> None:
+        bindings = {
+            "<KeyPress-h>": self.activate_pan_tool,
+            "<KeyPress-v>": self.activate_draw_tool,
+            "<Control-plus>": self.zoom_in,
+            "<Control-KP_Add>": self.zoom_in,
+            "<Control-equal>": self.zoom_in,
+            "<Control-minus>": self.zoom_out,
+            "<Control-KP_Subtract>": self.zoom_out,
+            "<Home>": self.fit_all,
+            "<Control-0>": self.reset_view,
+            "<KeyPress-q>": self.rotate_left,
+            "<KeyPress-e>": self.rotate_right,
+        }
+        for sequence, command in bindings.items():
+            self.bind(sequence, command)
+            self.canvas.bind(sequence, command)
+        self.canvas.focus_set()
+
+    def _show_context_menu(self, event: tk.Event) -> None:
+        self.context_menu.tk_popup(event.x_root, event.y_root)
+
+    def activate_draw_tool(self, _event: Optional[tk.Event] = None) -> str:
+        self.canvas.set_tool("draw")
+        self._update_status()
+        return "break"
+
+    def activate_pan_tool(self, _event: Optional[tk.Event] = None) -> str:
+        self.canvas.set_tool("pan")
+        self._update_status()
+        return "break"
+
+    def zoom_in(self, _event: Optional[tk.Event] = None) -> str:
+        self.canvas.zoom_center(1.2)
+        return "break"
+
+    def zoom_out(self, _event: Optional[tk.Event] = None) -> str:
+        self.canvas.zoom_center(1 / 1.2)
+        return "break"
+
+    def fit_all(self, _event: Optional[tk.Event] = None) -> str:
+        self.canvas.fit_all()
+        return "break"
+
+    def reset_view(self, _event: Optional[tk.Event] = None) -> str:
+        self.canvas.reset_view()
+        return "break"
+
+    def rotate_left(self, event: Optional[tk.Event] = None) -> str:
+        self.canvas.rotate_view(90 if self._shift_pressed(event) else 15)
+        return "break"
+
+    def rotate_right(self, event: Optional[tk.Event] = None) -> str:
+        self.canvas.rotate_view(-90 if self._shift_pressed(event) else -15)
+        return "break"
+
+    def _shift_pressed(self, event: Optional[tk.Event]) -> bool:
+        return bool(event is not None and event.state & 0x0001)
+
+    def _update_status(self) -> None:
+        if not hasattr(self, "canvas"):
+            return
+        cursor = self.canvas.cursor_world
+        coords = "x=—, y=—" if cursor is None else f"x={cursor.x:.3f}, y={cursor.y:.3f}"
+        self.status_text.set(
+            f"Курсор: {coords} · Масштаб: {self.canvas.scale_percent:.0f}% · "
+            f"Поворот: {self.canvas.rotation_degrees:.0f}° · Инструмент: {self.canvas.tool_title}"
+        )
 
     def _build_settings(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Панель настроек", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
@@ -396,6 +513,7 @@ class SaprApp(tk.Tk):
         self.canvas.set_objects(self._objects)
 
     def start_segment(self) -> None:
+        self.activate_draw_tool()
         self._p1 = None
         self._p2 = None
         self._awaiting = 1

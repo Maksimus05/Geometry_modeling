@@ -1,14 +1,15 @@
-"""Рабочая область: сетка, оси и отрезок."""
+"""Рабочая область: сетка, оси и навигация вида."""
 
 from __future__ import annotations
 
 import tk_bootstrap  # noqa: F401  — пути Tcl/Tk до импорта tkinter
 
+import math
 import tkinter as tk
 from typing import Callable, Optional
 
 from geometry import Point, Segment
-from shapes import Shape
+from shapes import SegmentShape, Shape
 
 
 class WorkCanvas(tk.Canvas):
@@ -17,6 +18,8 @@ class WorkCanvas(tk.Canvas):
         master: tk.Misc,
         *,
         on_point: Optional[Callable[[Point], None]] = None,
+        on_view_change: Optional[Callable[[], None]] = None,
+        on_cursor_change: Optional[Callable[[Optional[Point]], None]] = None,
         **kwargs,
     ) -> None:
         kwargs.setdefault("highlightthickness", 0)
@@ -24,6 +27,8 @@ class WorkCanvas(tk.Canvas):
         super().__init__(master, **kwargs)
 
         self.on_point = on_point
+        self.on_view_change = on_view_change
+        self.on_cursor_change = on_cursor_change
         self.grid_step = 1.0
         self.bg_color = "#f7f4ea"
         self.grid_color = "#cfc8b8"
@@ -33,21 +38,49 @@ class WorkCanvas(tk.Canvas):
         self.objects: list[Shape] = []
         self.selected_index: Optional[int] = None
         self.preview: Optional[Point] = None
+        self.active_tool = "draw"
 
         self._scale = 40.0
         self._offset_x = 0.0
         self._offset_y = 0.0
-        self._drag: Optional[tuple[int, int]] = None
+        self._rotation = 0.0
+        self._drag: Optional[tuple[int, int, str]] = None
+        self._cursor: Optional[Point] = None
 
         self.configure(bg=self.bg_color)
         self.bind("<Configure>", lambda _e: self.redraw())
         self.bind("<Button-1>", self._on_click)
+        self.bind("<ButtonPress-1>", self._on_button1_press, add="+")
+        self.bind("<B1-Motion>", self._do_pan)
+        self.bind("<ButtonRelease-1>", self._end_pan)
         self.bind("<Motion>", self._on_motion)
         self.bind("<ButtonPress-2>", self._start_pan)
         self.bind("<B2-Motion>", self._do_pan)
-        self.bind("<ButtonPress-3>", self._start_pan)
-        self.bind("<B3-Motion>", self._do_pan)
+        self.bind("<ButtonRelease-2>", self._end_pan)
         self.bind("<MouseWheel>", self._on_wheel)
+        self.bind("<Button-4>", lambda event: self.zoom_at(event.x, event.y, 1.1))
+        self.bind("<Button-5>", lambda event: self.zoom_at(event.x, event.y, 1 / 1.1))
+
+    @property
+    def scale_percent(self) -> float:
+        return self._scale / 40.0 * 100.0
+
+    @property
+    def rotation_degrees(self) -> float:
+        return math.degrees(self._rotation)
+
+    @property
+    def cursor_world(self) -> Optional[Point]:
+        return self._cursor
+
+    @property
+    def tool_title(self) -> str:
+        return "Рука" if self.active_tool == "pan" else "Построение"
+
+    def set_tool(self, tool: str) -> None:
+        self.active_tool = tool
+        self.configure(cursor="fleur" if tool == "pan" else "crosshair")
+        self._notify_view()
 
     def set_objects(self, objects: list[Shape]) -> None:
         self.objects = list(objects)
@@ -83,23 +116,42 @@ class WorkCanvas(tk.Canvas):
     def world_to_screen(self, x: float, y: float) -> tuple[float, float]:
         cx = self.winfo_width() / 2 + self._offset_x
         cy = self.winfo_height() / 2 + self._offset_y
-        return cx + x * self._scale, cy - y * self._scale
+        cos_a = math.cos(self._rotation)
+        sin_a = math.sin(self._rotation)
+        rx = x * cos_a - y * sin_a
+        ry = x * sin_a + y * cos_a
+        return cx + rx * self._scale, cy - ry * self._scale
 
     def screen_to_world(self, sx: float, sy: float) -> Point:
         cx = self.winfo_width() / 2 + self._offset_x
         cy = self.winfo_height() / 2 + self._offset_y
-        return Point((sx - cx) / self._scale, (cy - sy) / self._scale)
+        rx = (sx - cx) / self._scale
+        ry = (cy - sy) / self._scale
+        cos_a = math.cos(self._rotation)
+        sin_a = math.sin(self._rotation)
+        return Point(rx * cos_a + ry * sin_a, -rx * sin_a + ry * cos_a)
 
     def _on_click(self, event: tk.Event) -> None:
+        if self.active_tool == "pan":
+            return
         if self.on_point:
             self.on_point(self.screen_to_world(event.x, event.y))
 
     def _on_motion(self, event: tk.Event) -> None:
         self._cursor = self.screen_to_world(event.x, event.y)
+        if self.on_cursor_change:
+            self.on_cursor_change(self._cursor)
         self.redraw()
 
+    def _on_button1_press(self, event: tk.Event) -> None:
+        if self.active_tool == "pan":
+            self._start_pan(event)
+
     def _start_pan(self, event: tk.Event) -> None:
-        self._drag = (event.x, event.y)
+        self._drag = (event.x, event.y, "middle")
+
+    def _end_pan(self, _event: tk.Event) -> None:
+        self._drag = None
 
     def _do_pan(self, event: tk.Event) -> None:
         if self._drag is None:
@@ -108,18 +160,85 @@ class WorkCanvas(tk.Canvas):
         dy = event.y - self._drag[1]
         self._offset_x += dx
         self._offset_y += dy
-        self._drag = (event.x, event.y)
+        self._drag = (event.x, event.y, self._drag[2])
         self.redraw()
+        self._notify_view()
 
     def _on_wheel(self, event: tk.Event) -> None:
         factor = 1.1 if event.delta > 0 else 1 / 1.1
-        new_scale = min(max(self._scale * factor, 8.0), 400.0)
-        before = self.screen_to_world(event.x, event.y)
-        self._scale = new_scale
-        after = self.screen_to_world(event.x, event.y)
-        self._offset_x += (after.x - before.x) * self._scale
-        self._offset_y -= (after.y - before.y) * self._scale
+        self.zoom_at(event.x, event.y, factor)
+
+    def zoom_at(self, sx: float, sy: float, factor: float) -> None:
+        anchor = self.screen_to_world(sx, sy)
+        self._scale = min(max(self._scale * factor, 8.0), 400.0)
+        anchor_sx, anchor_sy = self.world_to_screen(anchor.x, anchor.y)
+        self._offset_x += sx - anchor_sx
+        self._offset_y += sy - anchor_sy
         self.redraw()
+        self._notify_view()
+
+    def zoom_center(self, factor: float) -> None:
+        self.zoom_at(self.winfo_width() / 2, self.winfo_height() / 2, factor)
+
+    def rotate_view(self, degrees: float, *, snap: bool = False) -> None:
+        center_sx = self.winfo_width() / 2
+        center_sy = self.winfo_height() / 2
+        center = self.screen_to_world(center_sx, center_sy)
+        self._rotation += math.radians(degrees)
+        if snap:
+            self._rotation = math.radians(round(math.degrees(self._rotation) / 90.0) * 90.0)
+        center_after_sx, center_after_sy = self.world_to_screen(center.x, center.y)
+        self._offset_x += center_sx - center_after_sx
+        self._offset_y += center_sy - center_after_sy
+        self.redraw()
+        self._notify_view()
+
+    def reset_view(self) -> None:
+        self._scale = 40.0
+        self._offset_x = 0.0
+        self._offset_y = 0.0
+        self._rotation = 0.0
+        self.redraw()
+        self._notify_view()
+
+    def fit_all(self) -> None:
+        bounds = self._objects_bounds()
+        if bounds is None:
+            self.reset_view()
+            return
+        xmin, xmax, ymin, ymax = bounds
+        width = max(xmax - xmin, self.grid_step)
+        height = max(ymax - ymin, self.grid_step)
+        margin = 80
+        usable_w = max(self.winfo_width() - margin * 2, 1)
+        usable_h = max(self.winfo_height() - margin * 2, 1)
+        self._rotation = 0.0
+        self._scale = min(max(min(usable_w / width, usable_h / height), 8.0), 400.0)
+        self._offset_x = 0.0
+        self._offset_y = 0.0
+        center = Point((xmin + xmax) / 2, (ymin + ymax) / 2)
+        sx, sy = self.world_to_screen(center.x, center.y)
+        self._offset_x += self.winfo_width() / 2 - sx
+        self._offset_y += self.winfo_height() / 2 - sy
+        self.redraw()
+        self._notify_view()
+
+    def _objects_bounds(self) -> Optional[tuple[float, float, float, float]]:
+        points: list[Point] = []
+        for shape in self.objects:
+            if isinstance(shape, SegmentShape):
+                points.extend([shape.p1, shape.p2])
+        if self.preview is not None:
+            points.append(self.preview)
+        if not points:
+            return None
+        xs = [p.x for p in points]
+        ys = [p.y for p in points]
+        return min(xs), max(xs), min(ys), max(ys)
+
+    def _notify_view(self) -> None:
+        if self.on_view_change:
+            self.on_view_change()
 
     def redraw(self) -> None:
         self.delete("all")
@@ -132,14 +251,19 @@ class WorkCanvas(tk.Canvas):
             shape.draw(self, index=i + 1, active=active)
         if self.preview is not None:
             self._draw_point(self.preview, "P1")
-        cursor = getattr(self, "_cursor", None)
-        if cursor is not None:
-            self._draw_cursor_hint(cursor)
+        if self._cursor is not None:
+            self._draw_cursor_hint(self._cursor)
 
     def _visible_world_bounds(self, w: int, h: int) -> tuple[float, float, float, float]:
-        p0 = self.screen_to_world(0, h)
-        p1 = self.screen_to_world(w, 0)
-        return p0.x, p1.x, p0.y, p1.y
+        corners = [
+            self.screen_to_world(0, 0),
+            self.screen_to_world(w, 0),
+            self.screen_to_world(0, h),
+            self.screen_to_world(w, h),
+        ]
+        xs = [p.x for p in corners]
+        ys = [p.y for p in corners]
+        return min(xs), max(xs), min(ys), max(ys)
 
     def _draw_grid(self, w: int, h: int) -> None:
         xmin, xmax, ymin, ymax = self._visible_world_bounds(w, h)
@@ -169,8 +293,8 @@ class WorkCanvas(tk.Canvas):
         self.create_line(ox, y1, oxb, y2, fill=self.axis_color, width=2, arrow=tk.LAST)
         oxs, oys = self.world_to_screen(0, 0)
         self.create_text(oxs + 14, oys + 14, text="O", fill=self.axis_color, font=("Segoe UI", 10, "bold"))
-        self.create_text(w - 18, y0 - 12, text="X", fill=self.axis_color, font=("Segoe UI", 11, "bold"))
-        self.create_text(ox + 14, 16, text="Y", fill=self.axis_color, font=("Segoe UI", 11, "bold"))
+        self.create_text(x2, y0b - 12, text="X", fill=self.axis_color, font=("Segoe UI", 11, "bold"))
+        self.create_text(oxb + 14, y2, text="Y", fill=self.axis_color, font=("Segoe UI", 11, "bold"))
 
         step = self.grid_step
         xmin_t, xmax_t, ymin_t, ymax_t = xmin, xmax, ymin, ymax
