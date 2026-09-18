@@ -256,17 +256,22 @@ class WorkCanvas(tk.Canvas):
     def redraw(self) -> None:
         # рендер сцены
         # Рендер каждый кадр строится заново из виртуальных объектов и текущей видовой матрицы.
+        # Сначала очищаем экран, чтобы старые пиксельные изображения объектов не оставались на холсте.
         self.delete("all")
         w = max(self.winfo_width(), 1)
         h = max(self.winfo_height(), 1)
+        # Сетка и оси тоже находятся в виртуальном пространстве, поэтому реагируют на масштаб и поворот.
         self._draw_grid(w, h)
         self._draw_axes(w, h)
+        # Все фигуры хранятся в мировых координатах, а при рисовании переводятся в координаты экрана.
         for i, shape in enumerate(self.objects):
             active = i == self.selected_index if self.selected_index is not None else i == len(self.objects) - 1
             shape.draw(self, index=i + 1, active=active)
         if self.preview is not None:
+            # Предпросмотр первой точки рисуется поверх сетки и объектов.
             self._draw_point(self.preview, "P1")
         if self._cursor is not None:
+            # Подсказка курсора показывает связь мыши с мировыми координатами.
             self._draw_cursor_hint(self._cursor)
 
     def _visible_world_bounds(self, w: int, h: int) -> tuple[float, float, float, float]:
