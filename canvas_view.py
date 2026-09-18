@@ -78,6 +78,7 @@ class WorkCanvas(tk.Canvas):
         return "Рука" if self.active_tool == "pan" else "Построение"
 
     def set_tool(self, tool: str) -> None:
+        # Инструмент меняет только режим взаимодействия, объекты чертежа не меняются.
         self.active_tool = tool
         self.configure(cursor="fleur" if tool == "pan" else "crosshair")
         self._notify_view()
@@ -114,6 +115,7 @@ class WorkCanvas(tk.Canvas):
         self.redraw()
 
     def world_to_screen(self, x: float, y: float) -> tuple[float, float]:
+        # Прямое видовое преобразование: мир -> экран с учетом поворота, масштаба и сдвига.
         cx = self.winfo_width() / 2 + self._offset_x
         cy = self.winfo_height() / 2 + self._offset_y
         cos_a = math.cos(self._rotation)
@@ -123,6 +125,7 @@ class WorkCanvas(tk.Canvas):
         return cx + rx * self._scale, cy - ry * self._scale
 
     def screen_to_world(self, sx: float, sy: float) -> Point:
+        # Обратное преобразование: координаты мыши на экране -> координаты чертежа.
         cx = self.winfo_width() / 2 + self._offset_x
         cy = self.winfo_height() / 2 + self._offset_y
         rx = (sx - cx) / self._scale
@@ -134,6 +137,7 @@ class WorkCanvas(tk.Canvas):
     def _on_click(self, event: tk.Event) -> None:
         if self.active_tool == "pan":
             return
+        # Точка клика сохраняется в мировой системе, а не в пикселях экрана.
         if self.on_point:
             self.on_point(self.screen_to_world(event.x, event.y))
 
@@ -156,6 +160,7 @@ class WorkCanvas(tk.Canvas):
     def _do_pan(self, event: tk.Event) -> None:
         if self._drag is None:
             return
+        # "Рука" двигает камеру: меняются смещения вида, координаты объектов остаются прежними.
         dx = event.x - self._drag[0]
         dy = event.y - self._drag[1]
         self._offset_x += dx
@@ -169,6 +174,7 @@ class WorkCanvas(tk.Canvas):
         self.zoom_at(event.x, event.y, factor)
 
     def zoom_at(self, sx: float, sy: float, factor: float) -> None:
+        # Лупа масштабирует относительно опорной точки: под курсором остается та же мировая точка.
         anchor = self.screen_to_world(sx, sy)
         self._scale = min(max(self._scale * factor, 8.0), 400.0)
         anchor_sx, anchor_sy = self.world_to_screen(anchor.x, anchor.y)
@@ -178,9 +184,11 @@ class WorkCanvas(tk.Canvas):
         self._notify_view()
 
     def zoom_center(self, factor: float) -> None:
+        # Кнопки "Лупа+" и "Лупа-" используют центр окна как точку масштабирования.
         self.zoom_at(self.winfo_width() / 2, self.winfo_height() / 2, factor)
 
     def rotate_view(self, degrees: float, *, snap: bool = False) -> None:
+        # Поворот выполняется вокруг текущего центра обзора, как поворот камеры над сценой.
         center_sx = self.winfo_width() / 2
         center_sy = self.winfo_height() / 2
         center = self.screen_to_world(center_sx, center_sy)
@@ -241,6 +249,7 @@ class WorkCanvas(tk.Canvas):
             self.on_view_change()
 
     def redraw(self) -> None:
+        # Рендер каждый кадр строится заново из виртуальных объектов и текущей видовой матрицы.
         self.delete("all")
         w = max(self.winfo_width(), 1)
         h = max(self.winfo_height(), 1)
