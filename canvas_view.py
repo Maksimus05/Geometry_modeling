@@ -78,6 +78,7 @@ class WorkCanvas(tk.Canvas):
         return "Рука" if self.active_tool == "pan" else "Построение"
 
     def set_tool(self, tool: str) -> None:
+        # переключение инструмента Рука
         # Инструмент меняет только режим взаимодействия, объекты чертежа не меняются.
         self.active_tool = tool
         self.configure(cursor="fleur" if tool == "pan" else "crosshair")
@@ -115,6 +116,7 @@ class WorkCanvas(tk.Canvas):
         self.redraw()
 
     def world_to_screen(self, x: float, y: float) -> tuple[float, float]:
+        # перевод мировых координат в экранные
         # Прямое видовое преобразование: мир -> экран с учетом поворота, масштаба и сдвига.
         cx = self.winfo_width() / 2 + self._offset_x
         cy = self.winfo_height() / 2 + self._offset_y
@@ -125,6 +127,7 @@ class WorkCanvas(tk.Canvas):
         return cx + rx * self._scale, cy - ry * self._scale
 
     def screen_to_world(self, sx: float, sy: float) -> Point:
+        # обратный перевод координат мыши в координаты чертежа
         # Обратное преобразование: координаты мыши на экране -> координаты чертежа.
         cx = self.winfo_width() / 2 + self._offset_x
         cy = self.winfo_height() / 2 + self._offset_y
@@ -160,6 +163,7 @@ class WorkCanvas(tk.Canvas):
     def _do_pan(self, event: tk.Event) -> None:
         if self._drag is None:
             return
+        # панорамирование
         # "Рука" двигает камеру: меняются смещения вида, координаты объектов остаются прежними.
         dx = event.x - self._drag[0]
         dy = event.y - self._drag[1]
@@ -174,6 +178,7 @@ class WorkCanvas(tk.Canvas):
         self.zoom_at(event.x, event.y, factor)
 
     def zoom_at(self, sx: float, sy: float, factor: float) -> None:
+        # масштабирование лупой относительно точки
         # Лупа масштабирует относительно опорной точки: под курсором остается та же мировая точка.
         anchor = self.screen_to_world(sx, sy)
         self._scale = min(max(self._scale * factor, 8.0), 400.0)
@@ -249,6 +254,7 @@ class WorkCanvas(tk.Canvas):
             self.on_view_change()
 
     def redraw(self) -> None:
+        # рендер сцены
         # Рендер каждый кадр строится заново из виртуальных объектов и текущей видовой матрицы.
         self.delete("all")
         w = max(self.winfo_width(), 1)

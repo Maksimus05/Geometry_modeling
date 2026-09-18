@@ -148,6 +148,7 @@ class SaprApp(tk.Tk):
         self.canvas.bind("<Button-3>", self._show_context_menu)
 
     def _bind_navigation_keys(self) -> None:
+        # горячие клавиши
         # Горячие клавиши вызывают те же команды, что и кнопки панели "Вид".
         bindings = {
             "<KeyPress-h>": self.activate_pan_tool,
@@ -181,11 +182,13 @@ class SaprApp(tk.Tk):
         return "break"
 
     def zoom_in(self, _event: Optional[tk.Event] = None) -> str:
+        # масштабирование кнопками
         # Масштабирование кнопкой выполняется относительно центра текущего вида.
         self.canvas.zoom_center(1.2)
         return "break"
 
     def zoom_out(self, _event: Optional[tk.Event] = None) -> str:
+        # масштабирование кнопками
         # Обратный коэффициент уменьшает вид с тем же центром масштабирования.
         self.canvas.zoom_center(1 / 1.2)
         return "break"
@@ -199,11 +202,13 @@ class SaprApp(tk.Tk):
         return "break"
 
     def rotate_left(self, event: Optional[tk.Event] = None) -> str:
+        # поворот и Shift на 90
         # Shift включает привязку поворота к шагу 90 градусов.
         self.canvas.rotate_view(90 if self._shift_pressed(event) else 15)
         return "break"
 
     def rotate_right(self, event: Optional[tk.Event] = None) -> str:
+        # поворот и Shift на 90
         # Без Shift вид поворачивается плавным шагом 15 градусов.
         self.canvas.rotate_view(-90 if self._shift_pressed(event) else -15)
         return "break"
